@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --edde-purple: #53226C;
+  --edde-vivid: #6a0deb;
+  --edde-yellow: #ffde00;
+  --edde-dark: #000000;
+  --edde-gray: #d9d9d9;
+  --edde-light: #faf7fb;
+}
+
+@layer base {
+  body {
+    background-color: var(--edde-light);
+    color: var(--edde-dark);
+    font-family: var(--font-poppins), sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+}
+
+@layer utilities {
+  .brand-gradient {
+    background: linear-gradient(135deg, #53226C 0%, #6a0deb 100%);
+  }
+
+  .brand-gradient-text {
+    background: linear-gradient(135deg, #53226C 0%, #6a0deb 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .brand-gradient-yellow {
+    background: linear-gradient(135deg, #6a0deb 0%, #53226C 60%, #ffde00 100%);
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(83, 34, 108, 0.1);
+    box-shadow: 0 10px 30px -5px rgba(83, 34, 108, 0.08);
+  }
+
+  .glass-card-dark {
+    background: rgba(83, 34, 108, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 222, 0, 0.2);
+    box-shadow: 0 15px 35px -5px rgba(0, 0, 0, 0.3);
+  }
+
+  .pulse-border {
+    animation: pulseBorder 2s infinite;
+  }
+}
+
+@keyframes pulseBorder {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 222, 0, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 222, 0, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 222, 0, 0);
+  }
+}
