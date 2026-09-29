@@ -148,14 +148,24 @@ const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const phaseProgress = (t: number, from: number, to: number) => clamp01((t - from) / (to - from));
 
 /** Camera altitude above the globe surface along the Baku axis, per timeline. */
-function altitudeAt(t: number): number {
+/**
+ * Orbit distance that fits the ENTIRE globe (all countries) on any screen —
+ * portrait phones need to pull back much further than landscape/desktop.
+ */
+function globeFitDistance(camera: THREE.PerspectiveCamera): number {
+  const halfV = THREE.MathUtils.degToRad(camera.fov) / 2;
+  const aspect = Math.min(1, camera.aspect); // portrait crops width hardest
+  return (GLOBE_R * 1.14) / (Math.tan(halfV) * aspect);
+}
+
+function altitudeAt(t: number, orbit: number): number {
   if (t < TIMELINE.clouds) return 1.5;
   if (t < TIMELINE.descent) return THREE.MathUtils.lerp(1.5, 1.32, phaseProgress(t, TIMELINE.clouds, TIMELINE.descent));
   if (t < TIMELINE.baku) return THREE.MathUtils.lerp(1.32, 0.34, easeInOut(phaseProgress(t, TIMELINE.descent, TIMELINE.baku)));
   if (t < TIMELINE.pullback) return THREE.MathUtils.lerp(0.34, 0.24, easeOut(phaseProgress(t, TIMELINE.baku, TIMELINE.pullback)));
-  if (t < TIMELINE.earth) return THREE.MathUtils.lerp(0.24, 4.4, easeInOut(phaseProgress(t, TIMELINE.pullback, TIMELINE.earth)));
-  if (t < TIMELINE.routes) return THREE.MathUtils.lerp(4.4, 4.55, phaseProgress(t, TIMELINE.earth, TIMELINE.routes));
-  return THREE.MathUtils.lerp(4.55, 4.35, phaseProgress(t, TIMELINE.routes, TIMELINE.cta + 4));
+  if (t < TIMELINE.earth) return THREE.MathUtils.lerp(0.24, orbit, easeInOut(phaseProgress(t, TIMELINE.pullback, TIMELINE.earth)));
+  if (t < TIMELINE.routes) return THREE.MathUtils.lerp(orbit, orbit * 1.05, phaseProgress(t, TIMELINE.earth, TIMELINE.routes));
+  return THREE.MathUtils.lerp(orbit * 1.05, orbit * 0.98, phaseProgress(t, TIMELINE.routes, TIMELINE.cta + 4));
 }
 
 /* ------------------------------------------------------------------ */
@@ -225,7 +235,8 @@ function CameraDirector({
   const target = useMemo(() => new THREE.Vector3(), []);
   useFrame((state) => {
     const t = timeline.current.t;
-    const h = altitudeAt(t);
+    const orbit = globeFitDistance(state.camera as THREE.PerspectiveCamera);
+    const h = altitudeAt(t, orbit);
     // position on the Baku axis
     state.camera.position.copy(BAKU_NORMAL).multiplyScalar(GLOBE_R + h);
 
@@ -448,7 +459,6 @@ function BakuCity({ timeline }: { timeline: React.MutableRefObject<TimelineState
           <planeGeometry args={[REGION_SIZE, REGION_SIZE]} />
           <meshBasicMaterial
             ref={regionMatRef}
-            color="#0e1420"
             transparent
             opacity={0}
             alphaMap={regionAlpha}
@@ -460,7 +470,6 @@ function BakuCity({ timeline }: { timeline: React.MutableRefObject<TimelineState
           <planeGeometry args={[CITY_SIZE, CITY_SIZE]} />
           <meshBasicMaterial
             ref={cityMatRef}
-            color="#0e1420"
             transparent
             opacity={0}
             alphaMap={cityAlpha}
