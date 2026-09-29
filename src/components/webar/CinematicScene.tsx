@@ -369,6 +369,7 @@ function BakuCity({ timeline }: { timeline: React.MutableRefObject<TimelineState
       if (regionMatRef.current) {
         regionMatRef.current.map = tex;
         regionMatRef.current.color.set('#ffffff');
+        regionMatRef.current.userData.loaded = true;
         regionMatRef.current.needsUpdate = true;
       }
     });
@@ -377,6 +378,7 @@ function BakuCity({ timeline }: { timeline: React.MutableRefObject<TimelineState
       if (cityMatRef.current) {
         cityMatRef.current.map = tex;
         cityMatRef.current.color.set('#ffffff');
+        cityMatRef.current.userData.loaded = true;
         cityMatRef.current.needsUpdate = true;
       }
     });
@@ -408,8 +410,13 @@ function BakuCity({ timeline }: { timeline: React.MutableRefObject<TimelineState
     const fadeOut = clamp01(1 - phaseProgress(t, TIMELINE.pullback + 2.2, TIMELINE.pullback + 3.4));
     const base = fadeIn * fadeOut;
     if (seaMatRef.current) seaMatRef.current.opacity = base;
-    if (regionMatRef.current) regionMatRef.current.opacity = base;
-    if (cityMatRef.current) cityMatRef.current.opacity = fadeInCity * fadeOut;
+    if (regionMatRef.current) {
+      regionMatRef.current.opacity = base * (regionMatRef.current.userData.loaded ? 1 : 0);
+    }
+    if (cityMatRef.current) {
+      cityMatRef.current.opacity =
+        fadeInCity * fadeOut * (cityMatRef.current.userData.loaded ? 1 : 0);
+    }
 
     // Continuous shrink into a single glowing point on the Earth during the pullback
     const shrink = phaseProgress(t, TIMELINE.pullback, TIMELINE.pullback + 2.6);
@@ -424,9 +431,11 @@ function BakuCity({ timeline }: { timeline: React.MutableRefObject<TimelineState
         <circleGeometry args={[14, 48]} />
         <meshStandardMaterial
           ref={seaMatRef}
-          color="#08263f"
-          metalness={0.75}
-          roughness={0.25}
+          color="#0a2c4a"
+          metalness={0.3}
+          roughness={0.5}
+          emissive="#041020"
+          emissiveIntensity={0.6}
           transparent
           opacity={0}
         />
