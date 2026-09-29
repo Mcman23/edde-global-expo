@@ -614,7 +614,7 @@ function EarthGlobe({
   // Lazy, progressive texture loading — nothing blocks the first frames
   useEffect(() => {
     const loader = new THREE.TextureLoader();
-    loader.load('/assets/earth-blue-marble.jpg', (tex) => {
+    loader.load('/assets/earth-satellite.jpg', (tex) => {
       tex.colorSpace = THREE.SRGBColorSpace;
       const mat = surfaceMaterialRef.current;
       if (mat) {
@@ -890,6 +890,34 @@ function Starfield({ count = 260 }: { count?: number }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Light director — night ambience for the city, satellite daylight   */
+/* for the Earth                                                      */
+/* ------------------------------------------------------------------ */
+
+function LightDirector({
+  timeline,
+  ambientRef,
+  sunRef,
+}: {
+  timeline: React.MutableRefObject<TimelineState>;
+  ambientRef: React.MutableRefObject<THREE.AmbientLight | null>;
+  sunRef: React.MutableRefObject<THREE.DirectionalLight | null>;
+}) {
+  useFrame(() => {
+    const t = timeline.current.t;
+    // Ramp up as we pull away from night-time Baku toward the daylight globe
+    const day = easeInOut(phaseProgress(t, TIMELINE.pullback, TIMELINE.earth));
+    if (ambientRef.current) {
+      ambientRef.current.intensity = THREE.MathUtils.lerp(0.55, 1.05, day);
+    }
+    if (sunRef.current) {
+      sunRef.current.intensity = THREE.MathUtils.lerp(1.1, 0.45, day);
+    }
+  });
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
 /* World rotator — globe, city, markers and routes turn together       */
 /* ------------------------------------------------------------------ */
 
@@ -927,6 +955,8 @@ export function CinematicScene({
   showStars = false,
 }: CinematicSceneProps) {
   const timeline = useRef<TimelineState>({ t: 0, routeIndex: -1, routeProgress: 0 });
+  const ambientRef = useRef<THREE.AmbientLight>(null);
+  const sunRef = useRef<THREE.DirectionalLight>(null);
   const onPhaseChangeRef = useRef(onPhaseChange ?? (() => {}));
   useEffect(() => {
     onPhaseChangeRef.current = onPhaseChange ?? (() => {});
@@ -939,13 +969,15 @@ export function CinematicScene({
       dpr={[1, 1.75]}
       style={{ background: 'transparent' }}
     >
-      {/* Lighting: cool moon ambience + warm city glow from Baku */}
-      <ambientLight intensity={0.55} />
-      <directionalLight position={[4, 6, 4]} intensity={1.1} color="#cfd8ff" />
+      {/* Lighting: moody night ambience for the city phases, brightening into
+          a clean satellite-photo light once the Earth is revealed */}
+      <ambientLight ref={ambientRef} intensity={0.55} />
+      <directionalLight ref={sunRef} position={[4, 6, 4]} intensity={1.1} color="#cfd8ff" />
       <directionalLight position={[-4, -2, -4]} intensity={0.35} color="#53226C" />
 
       <TimelineController timeline={timeline} onPhaseChangeRef={onPhaseChangeRef} />
       <CameraDirector timeline={timeline} parallaxRef={parallaxRef} />
+      <LightDirector timeline={timeline} ambientRef={ambientRef} sunRef={sunRef} />
 
       {showStars && <Starfield />}
       <WorldRotator timeline={timeline} reducedMotion={reducedMotion}>
