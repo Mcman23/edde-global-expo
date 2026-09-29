@@ -3,8 +3,10 @@
 import { useState, useEffect, useCallback } from 'react';
 
 export interface WebARSupportState {
+  /** getUserMedia is available — the camera experience can be attempted. */
   supported: boolean;
   checking: boolean;
+  /** iOS 13+ requires an explicit user-gesture permission request for motion sensors. */
   needsPermissionRequest: boolean;
   requestPermission: () => Promise<boolean>;
 }
@@ -25,15 +27,13 @@ export function useWebARSupport(): WebARSupportState {
     let needsPermission = false;
 
     if (typeof window !== 'undefined') {
-      const hasGetUserMedia = !!(
+      // Camera capability is the only hard requirement for the camera level.
+      // Gyroscope is an optional enhancement (parallax) — never a blocker.
+      isSupported = !!(
         navigator &&
         navigator.mediaDevices &&
         typeof navigator.mediaDevices.getUserMedia === 'function'
       );
-
-      const hasGyro = typeof DeviceOrientationEvent !== 'undefined';
-
-      isSupported = hasGetUserMedia && hasGyro;
 
       needsPermission =
         typeof DeviceOrientationEvent !== 'undefined' &&
