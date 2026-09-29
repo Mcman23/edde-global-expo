@@ -104,46 +104,29 @@ function makeCloudTexture(): THREE.Texture {
   return tex;
 }
 
-/** Warm lit-window grid used as an emissive map for night buildings. */
-function makeWindowsTexture(): THREE.Texture {
-  const size = 64;
+/** Soft edge-fade alpha map so map layers composite like Google Maps zoom levels. */
+function makeEdgeFadeAlpha(frac = 0.15): THREE.Texture {
+  const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, size, size);
-  for (let y = 3; y < size - 2; y += 5) {
-    for (let x = 3; x < size - 2; x += 4) {
-      if (Math.random() < 0.55) {
-        ctx.fillStyle = Math.random() < 0.8 ? '#ffb066' : '#6a86b8';
-        ctx.fillRect(x, y, 2, 2);
-      }
+  const img = ctx.createImageData(size, size);
+  const edge = frac * size;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const d = Math.min(x, size - 1 - x, y, size - 1 - y);
+      let t = clamp01(d / edge);
+      t = t * t * (3 - 2 * t); // smoothstep
+      const v = Math.round(t * 255);
+      const i = (y * size + x) * 4;
+      img.data[i] = v;
+      img.data[i + 1] = v;
+      img.data[i + 2] = v;
+      img.data[i + 3] = 255;
     }
   }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
-}
-
-/** Vertical light streaks for the landmark (Flame-Tower-inspired) towers. */
-function makeStreakTexture(): THREE.Texture {
-  const w = 32;
-  const h = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, w, h);
-  for (let x = 2; x < w - 1; x += 5) {
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, 'rgba(255,176,102,0.9)');
-    g.addColorStop(0.5, 'rgba(255,140,80,0.35)');
-    g.addColorStop(1, 'rgba(255,176,102,0.9)');
-    ctx.fillStyle = g;
-    ctx.fillRect(x, 0, 1.5, h);
-  }
+  ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
   return tex;
@@ -359,221 +342,124 @@ function CloudLayer({
 }
 
 /* ------------------------------------------------------------------ */
-/* Baku city — procedural aerial night city on the globe surface      */
+/* Baku — real satellite imagery (Google-Maps-style), two zoom levels  */
 /* ------------------------------------------------------------------ */
 
-function BakuCity({
-  timeline,
-  reducedMotion,
-}: {
-  timeline: React.MutableRefObject<TimelineState>;
-  reducedMotion: boolean;
-}) {
+// City-scale frame: 1 local unit = 18.5 km (sizes derived from tile geometry)
+const REGION_SIZE = 0.40287; // z15 layer: ~7.5 km of Caspian coast around Baku
+const CITY_SIZE = 0.07555; // z17 layer: ~1.4 km of downtown detail
+// Layer centers relative to the Baku anchor point (north = -Z in the map frame)
+const REGION_OFFSET: [number, number] = [-0.014, 0.12];
+const CITY_OFFSET: [number, number] = [-0.1651, 0.1829];
+
+function BakuCity({ timeline }: { timeline: React.MutableRefObject<TimelineState> }) {
   const groupRef = useRef<THREE.Group>(null);
-  const instancedRef = useRef<THREE.InstancedMesh>(null);
-  const towerGlowRefs = useRef<THREE.Sprite[]>([]);
-  const materialsCacheRef = useRef<Array<{ material: THREE.Material; base: number }>>([]);
+  const seaMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const regionMatRef = useRef<THREE.MeshBasicMaterial>(null);
+  const cityMatRef = useRef<THREE.MeshBasicMaterial>(null);
 
-  const windowsTexture = useMemo(() => makeWindowsTexture(), []);
-  const streakTexture = useMemo(() => makeStreakTexture(), []);
-  const glowTexture = useMemo(
-    () =>
-      makeRadialTexture([
-        [0, 'rgba(255,210,160,0.9)'],
-        [0.35, 'rgba(255,176,102,0.35)'],
-        [1, 'rgba(255,176,102,0)'],
-      ]),
-    []
-  );
+  const regionAlpha = useMemo(() => makeEdgeFadeAlpha(0.14), []);
+  const cityAlpha = useMemo(() => makeEdgeFadeAlpha(0.2), []);
 
-  const BUILDING_COUNT = 150;
-  const buildingData = useMemo(() => {
-    const items: Array<{ x: number; z: number; w: number; d: number; h: number }> = [];
-    for (let i = 0; i < BUILDING_COUNT; i++) {
-      // gaussian-ish cluster: dense downtown, sparser outskirts
-      const angle = Math.random() * Math.PI * 2;
-      const radius = Math.pow(Math.random(), 1.7) * 1.25;
-      const central = clamp01(1 - radius / 1.25);
-      const height = 0.05 + Math.random() * 0.1 + central * (0.08 + Math.random() * 0.22);
-      items.push({
-        x: Math.cos(angle) * radius,
-        z: Math.sin(angle) * radius * 0.8, // city hugs the coastline
-        w: 0.035 + Math.random() * 0.05,
-        d: 0.035 + Math.random() * 0.05,
-        h: height,
-      });
-    }
-    return items;
+  // Lazy progressive texture loading — the fast start screen is never blocked
+  useEffect(() => {
+    const loader = new THREE.TextureLoader();
+    loader.load('/assets/baku-region.jpg', (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      if (regionMatRef.current) {
+        regionMatRef.current.map = tex;
+        regionMatRef.current.color.set('#ffffff');
+        regionMatRef.current.needsUpdate = true;
+      }
+    });
+    loader.load('/assets/baku-city.jpg', (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      if (cityMatRef.current) {
+        cityMatRef.current.map = tex;
+        cityMatRef.current.color.set('#ffffff');
+        cityMatRef.current.needsUpdate = true;
+      }
+    });
   }, []);
 
-  useEffect(() => {
-    // Orient the whole city group on the globe surface at Baku's real position
-    const group = groupRef.current;
-    if (!group) return;
-    group.position.copy(BAKU_POS);
-    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), BAKU_NORMAL);
-
-    // Fill building instance matrices
-    const mesh = instancedRef.current;
-    if (mesh) {
-      const dummy = new THREE.Object3D();
-      buildingData.forEach((b, i) => {
-        dummy.position.set(b.x, b.h / 2, b.z);
-        dummy.scale.set(b.w, b.h, b.d);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
-      });
-      mesh.instanceMatrix.needsUpdate = true;
-    }
-  }, [buildingData]);
+  // Align the map's north with the tangent-plane north at Baku
+  const northYaw = useMemo(() => {
+    const northWorld = latLonToVector3(41.4, 49.87, GLOBE_R)
+      .sub(latLonToVector3(40.4, 49.87, GLOBE_R))
+      .normalize();
+    const northTangent = northWorld
+      .clone()
+      .sub(BAKU_NORMAL.clone().multiplyScalar(northWorld.dot(BAKU_NORMAL)))
+      .normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), BAKU_NORMAL);
+    const lx = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+    const lz = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    return Math.atan2(-northTangent.dot(lx), -northTangent.dot(lz));
+  }, []);
 
   useFrame(() => {
     const t = timeline.current.t;
     const group = groupRef.current;
     if (!group) return;
 
-    // Discover-through-the-clouds fade: the city materializes below the
-    // cloud layer during the descent, then dissolves into the Earth.
+    // Discover through the clouds: regional view first, downtown detail as we close in
     const fadeIn = clamp01(phaseProgress(t, TIMELINE.descent + 0.2, TIMELINE.descent + 2.2));
+    const fadeInCity = clamp01(phaseProgress(t, TIMELINE.descent + 1.7, TIMELINE.descent + 2.7));
     const fadeOut = clamp01(1 - phaseProgress(t, TIMELINE.pullback + 2.2, TIMELINE.pullback + 3.4));
-    const groupFade = fadeIn * fadeOut;
+    const base = fadeIn * fadeOut;
+    if (seaMatRef.current) seaMatRef.current.opacity = base;
+    if (regionMatRef.current) regionMatRef.current.opacity = base;
+    if (cityMatRef.current) cityMatRef.current.opacity = fadeInCity * fadeOut;
 
-    if (materialsCacheRef.current.length === 0) {
-      group.traverse((obj) => {
-        const mat = (obj as THREE.Mesh).material as THREE.Material | undefined;
-        if (mat && !Array.isArray(mat)) {
-          mat.transparent = true;
-          materialsCacheRef.current.push({
-            material: mat,
-            base: (mat as THREE.Material & { opacity: number }).opacity,
-          });
-        }
-      });
-    }
-    materialsCacheRef.current.forEach(({ material, base }) => {
-      (material as THREE.Material & { opacity: number }).opacity = base * groupFade;
-    });
-
-    // The city is at full scale while we are near it; during the pullback it
-    // continuously shrinks into a single glowing point on the Earth below.
+    // Continuous shrink into a single glowing point on the Earth during the pullback
     const shrink = phaseProgress(t, TIMELINE.pullback, TIMELINE.pullback + 2.6);
-    const s = THREE.MathUtils.lerp(1, 0.002, easeInOut(shrink));
-    group.scale.setScalar(s);
-    group.visible = groupFade > 0.005;
+    group.scale.setScalar(THREE.MathUtils.lerp(1, 0.002, easeInOut(shrink)));
+    group.visible = base > 0.005;
   });
-
-  const towerProfile = useMemo(() => {
-    const pts: Array<THREE.Vector2> = [];
-    for (let i = 0; i <= 10; i++) {
-      const p = i / 10;
-      pts.push(new THREE.Vector2(0.05 * Math.pow(1 - p, 1.4) + 0.004, p * 0.62));
-    }
-    return pts;
-  }, []);
-
-  const towers = useMemo(
-    () => [
-      { x: 0.16, z: -0.08, h: 1.0, tilt: 0.06 },
-      { x: 0.26, z: 0.02, h: 0.82, tilt: -0.05 },
-      { x: 0.07, z: 0.06, h: 0.9, tilt: 0.04 },
-    ],
-    []
-  );
 
   return (
     <group ref={groupRef}>
-      {/* Caspian Sea */}
+      {/* Caspian Sea base */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]}>
         <circleGeometry args={[14, 48]} />
-        <meshStandardMaterial color="#08263f" metalness={0.75} roughness={0.25} />
-      </mesh>
-      {/* Land mass / coastline plate under the city */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-        <circleGeometry args={[1.9, 40]} />
-        <meshStandardMaterial color="#15151f" roughness={0.9} />
-      </mesh>
-
-      {/* Generic city blocks */}
-      <instancedMesh ref={instancedRef} args={[undefined, undefined, BUILDING_COUNT]}>
-        <boxGeometry args={[1, 1, 1]} />
         <meshStandardMaterial
-          color="#0d0d16"
-          emissive="#ffffff"
-          emissiveMap={windowsTexture}
-          emissiveIntensity={0.55}
-          roughness={0.85}
+          ref={seaMatRef}
+          color="#08263f"
+          metalness={0.75}
+          roughness={0.25}
+          transparent
+          opacity={0}
         />
-      </instancedMesh>
+      </mesh>
 
-      {/* Landmark towers (Flame-Tower-inspired) */}
-      {towers.map((tw, i) => (
-        <group key={i} position={[tw.x, 0, tw.z]} rotation={[tw.tilt, 0, tw.tilt * 0.7]}>
-          <mesh scale={[1, tw.h, 1]}>
-            <latheGeometry args={[towerProfile, 14]} />
-            <meshStandardMaterial
-              color="#141420"
-              emissive="#ffb066"
-              emissiveMap={streakTexture}
-              emissiveIntensity={0.9}
-              roughness={0.6}
-              metalness={0.3}
-            />
-          </mesh>
-          <sprite
-            ref={(el) => {
-              if (el) towerGlowRefs.current[i] = el;
-            }}
-            position={[0, 0.62 * tw.h, 0]}
-            scale={[0.34, 0.34, 1]}
-          >
-            <spriteMaterial
-              map={glowTexture}
-              color="#ffcf9e"
-              transparent
-              opacity={0.55}
-              depthWrite={false}
-              blending={THREE.AdditiveBlending}
-            />
-          </sprite>
-        </group>
-      ))}
-
-      {/* Street lights scattered across the city */}
-      <StreetLights reducedMotion={reducedMotion} />
-
-      {/* Warm downtown light */}
-      <pointLight position={[0, 0.35, 0]} color="#ffb066" intensity={2.2} distance={3} />
+      {/* North-aligned map frame */}
+      <group rotation={[0, northYaw, 0]}>
+        {/* Regional satellite layer (z15) */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[REGION_OFFSET[0], 0.004, REGION_OFFSET[1]]}>
+          <planeGeometry args={[REGION_SIZE, REGION_SIZE]} />
+          <meshBasicMaterial
+            ref={regionMatRef}
+            color="#0e1420"
+            transparent
+            opacity={0}
+            alphaMap={regionAlpha}
+            depthWrite={false}
+          />
+        </mesh>
+        {/* Downtown satellite layer (z17) */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[CITY_OFFSET[0], 0.008, CITY_OFFSET[1]]}>
+          <planeGeometry args={[CITY_SIZE, CITY_SIZE]} />
+          <meshBasicMaterial
+            ref={cityMatRef}
+            color="#0e1420"
+            transparent
+            opacity={0}
+            alphaMap={cityAlpha}
+            depthWrite={false}
+          />
+        </mesh>
+      </group>
     </group>
-  );
-}
-
-function StreetLights({ reducedMotion }: { reducedMotion: boolean }) {
-  const geometry = useMemo(() => {
-    const count = reducedMotion ? 160 : 320;
-    const positions = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const radius = Math.pow(Math.random(), 1.5) * 1.35;
-      positions[i * 3] = Math.cos(angle) * radius;
-      positions[i * 3 + 1] = 0.012;
-      positions[i * 3 + 2] = Math.sin(angle) * radius * 0.85;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    return geo;
-  }, [reducedMotion]);
-  return (
-    <points geometry={geometry}>
-      <pointsMaterial
-        color="#ffcf9e"
-        size={0.016}
-        transparent
-        opacity={0.85}
-        sizeAttenuation
-        depthWrite={false}
-        blending={THREE.AdditiveBlending}
-      />
-    </points>
   );
 }
 
@@ -921,13 +807,23 @@ function LightDirector({
 /* World rotator — globe, city, markers and routes turn together       */
 /* ------------------------------------------------------------------ */
 
+interface DragState {
+  dragging: boolean;
+  lastX: number;
+  velocity: number;
+  offset: number;
+  auto: number;
+}
+
 function WorldRotator({
   timeline,
   reducedMotion,
+  dragRef,
   children,
 }: {
   timeline: React.MutableRefObject<TimelineState>;
   reducedMotion: boolean;
+  dragRef: React.MutableRefObject<DragState>;
   children: React.ReactNode;
 }) {
   const groupRef = useRef<THREE.Group>(null);
@@ -935,11 +831,16 @@ function WorldRotator({
     const t = timeline.current.t;
     const group = groupRef.current;
     if (!group) return;
+    const d = dragRef.current;
+    // Subtle auto drift keeps the shot alive; user drag adds full-spin control
     if (t > TIMELINE.earth) {
-      // Subtle drift keeps the shot alive; angle stays tiny so Baku
-      // remains the visual anchor near the frame center
-      group.rotation.y += delta * (reducedMotion ? 0.003 : 0.01);
+      d.auto += delta * (reducedMotion ? 0.003 : 0.01);
     }
+    if (!d.dragging) {
+      d.offset += d.velocity;
+      d.velocity *= 0.93; // gentle inertia
+    }
+    group.rotation.y = d.auto + d.offset;
   });
   return <group ref={groupRef}>{children}</group>;
 }
@@ -957,12 +858,42 @@ export function CinematicScene({
   const timeline = useRef<TimelineState>({ t: 0, routeIndex: -1, routeProgress: 0 });
   const ambientRef = useRef<THREE.AmbientLight>(null);
   const sunRef = useRef<THREE.DirectionalLight>(null);
+  const dragRef = useRef<DragState>({ dragging: false, lastX: 0, velocity: 0, offset: 0, auto: 0 });
+
+  // Touch/pointer rotation of the Earth (active once the globe is revealed)
+  const canRotate = () => timeline.current.t > TIMELINE.earth;
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!canRotate()) return;
+    dragRef.current.dragging = true;
+    dragRef.current.lastX = e.clientX;
+    dragRef.current.velocity = 0;
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d.dragging) return;
+    const dx = e.clientX - d.lastX;
+    d.lastX = e.clientX;
+    d.offset += dx * 0.005;
+    d.velocity = dx * 0.005;
+  };
+  const endDrag = () => {
+    dragRef.current.dragging = false;
+  };
   const onPhaseChangeRef = useRef(onPhaseChange ?? (() => {}));
   useEffect(() => {
     onPhaseChangeRef.current = onPhaseChange ?? (() => {});
   }, [onPhaseChange]);
 
   return (
+    <div
+      className="w-full h-full"
+      style={{ touchAction: 'none' }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerLeave={endDrag}
+      onPointerCancel={endDrag}
+    >
     <Canvas
       gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
       camera={{ position: BAKU_NORMAL.clone().multiplyScalar(GLOBE_R + 1.5).toArray() as [number, number, number], fov: 45 }}
@@ -980,14 +911,15 @@ export function CinematicScene({
       <LightDirector timeline={timeline} ambientRef={ambientRef} sunRef={sunRef} />
 
       {showStars && <Starfield />}
-      <WorldRotator timeline={timeline} reducedMotion={reducedMotion}>
+      <WorldRotator timeline={timeline} reducedMotion={reducedMotion} dragRef={dragRef}>
         <EarthGlobe timeline={timeline} />
         <BakuMarker timeline={timeline} />
-        <BakuCity timeline={timeline} reducedMotion={reducedMotion} />
+        <BakuCity timeline={timeline} />
         <Routes timeline={timeline} />
       </WorldRotator>
       <CloudLayer timeline={timeline} reducedMotion={reducedMotion} />
     </Canvas>
+    </div>
   );
 }
 

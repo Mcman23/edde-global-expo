@@ -322,8 +322,13 @@ function ExpoPageInner() {
                   </button>
                 </div>
               ) : (
-                <div className="text-[11px] text-white/40 tracking-widest uppercase font-poppins">
-                  EDDE GLOBAL PRESENTS
+                <div className="space-y-1 animate-fade-in">
+                  <div className="text-[11px] text-white/40 tracking-widest uppercase font-poppins">
+                    EDDE GLOBAL PRESENTS
+                  </div>
+                  <div className="text-[8px] text-white/25 tracking-wider uppercase font-poppins">
+                    Satellite imagery &#8226; Esri World Imagery
+                  </div>
                 </div>
               )}
             </div>
