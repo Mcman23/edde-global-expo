@@ -439,7 +439,7 @@ function BakuCity({ timeline }: { timeline: React.MutableRefObject<TimelineState
     <group ref={groupRef}>
       {/* Caspian Sea base */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]}>
-        <circleGeometry args={[14, 48]} />
+        <circleGeometry args={[2.6, 48]} />
         <meshStandardMaterial
           ref={seaMatRef}
           color="#0a2c4a"
@@ -545,8 +545,10 @@ function EarthGlobe({
     // The planet body emerges beneath the clouds during the pullback —
     // before that the real camera environment stays fully visible.
     const reveal = easeInOut(phaseProgress(t, TIMELINE.pullback + 0.6, TIMELINE.pullback + 2.6));
+    group.visible = reveal > 0.005;
     if (surfaceMaterialRef.current) {
       surfaceMaterialRef.current.opacity = reveal;
+      surfaceMaterialRef.current.depthWrite = reveal > 0.5;
     }
     if (atmosphereMaterialRef.current) {
       (atmosphereMaterialRef.current.uniforms.uIntensity as { value: number }).value = 1.1 * reveal;
