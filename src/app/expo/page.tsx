@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { trackEvent } from '@/lib/analytics';
 import { useWebARSupport } from '@/components/webar/useWebARSupport';
+import { ROUTE_ORDER, ROUTE_META } from '@/lib/config/routeDestinations';
 
 // Lazy load the heavy 3D experience only after the (fast) start screen renders
 const ExpoWebARExperience = dynamic(
@@ -24,9 +25,12 @@ type ExperienceMode = 'camera' | 'nocamera';
 const PHASE_CAPTIONS: Record<string, { title: string; sub?: string }> = {
   baku: { title: 'BAKU', sub: 'FROM BAKU' },
   earth: { title: 'BAKU' },
-  'route:london': { title: 'LONDON', sub: 'UNITED KINGDOM' },
-  'route:toronto': { title: 'TORONTO', sub: 'CANADA' },
-  'route:sydney': { title: 'SYDNEY', sub: 'AUSTRALIA' },
+  ...Object.fromEntries(
+    ROUTE_ORDER.map((key) => [
+      `route:${key}`,
+      { title: ROUTE_META[key].name.toUpperCase(), sub: ROUTE_META[key].country.toUpperCase() },
+    ])
+  ),
 };
 
 function ShieldCrownLogo({ className = 'w-10 h-10' }: { className?: string }) {

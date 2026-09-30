@@ -4,6 +4,7 @@ import React, { useMemo, useRef, useEffect, useCallback } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { latLonToVector3 } from '@/lib/config/destinations';
+import { ROUTE_ORDER, ROUTE_META, ROUTE_DURATION, type RouteKey } from '@/lib/config/routeDestinations';
 
 /**
  * CINEMATIC WEBAR SCENE
@@ -30,18 +31,11 @@ export const TIMELINE = {
   pullback: 9,
   earth: 12,
   routes: 15,
-  cta: 20,
+  cta: 25.4, // 18 short route arcs (0.55s each) after the routes mark
 } as const;
 
-export const ROUTE_ORDER = ['london', 'toronto', 'sydney'] as const;
-export type RouteKey = (typeof ROUTE_ORDER)[number];
-export const ROUTE_DURATION = 1.7;
-
-const ROUTE_META: Record<RouteKey, { name: string; country: string; lat: number; lon: number }> = {
-  london: { name: 'London', country: 'United Kingdom', lat: 51.5, lon: -0.13 },
-  toronto: { name: 'Toronto', country: 'Canada', lat: 43.65, lon: -79.38 },
-  sydney: { name: 'Sydney', country: 'Australia', lat: -33.87, lon: 151.21 },
-};
+export { ROUTE_ORDER, ROUTE_META, ROUTE_DURATION };
+export type { RouteKey };
 
 const GLOBE_R = 2;
 const BRAND_GOLD = '#ffde00';
@@ -178,9 +172,9 @@ const PHASE_MARKS: Array<[number, string]> = [
   [TIMELINE.baku, 'baku'],
   [TIMELINE.pullback, 'pullback'],
   [TIMELINE.earth, 'earth'],
-  [TIMELINE.routes, 'route:london'],
-  [TIMELINE.routes + ROUTE_DURATION, 'route:toronto'],
-  [TIMELINE.routes + ROUTE_DURATION * 2, 'route:sydney'],
+  ...ROUTE_ORDER.map(
+    (key, i) => [TIMELINE.routes + ROUTE_DURATION * i, `route:${key}`] as [number, string]
+  ),
   [TIMELINE.cta, 'cta'],
 ];
 
@@ -357,11 +351,15 @@ function CloudLayer({
 /* ------------------------------------------------------------------ */
 
 // City-scale frame: 1 local unit = 18.5 km (sizes derived from tile geometry)
-const REGION_SIZE = 0.40287; // z15 layer: ~7.5 km of Caspian coast around Baku
-const CITY_SIZE = 0.07555; // z17 layer: ~1.4 km of downtown detail
+// Scaled up ~3.2x from the raw tile calibration so the coastline photo always
+// fills the camera frame during the whole "baku" hero shot (0.24-0.6 altitude),
+// with soft-fade margin to spare — no visible photo edges on any screen ratio.
+const GROUND_SCALE = 3.227;
+const REGION_SIZE = 0.40287 * GROUND_SCALE; // z15 layer: ~7.5 km of Caspian coast around Baku
+const CITY_SIZE = 0.07555 * GROUND_SCALE; // z17 layer: ~1.4 km of downtown detail
 // Layer centers relative to the Baku anchor point (north = -Z in the map frame)
-const REGION_OFFSET: [number, number] = [-0.014, 0.12];
-const CITY_OFFSET: [number, number] = [-0.1651, 0.1829];
+const REGION_OFFSET: [number, number] = [-0.014 * GROUND_SCALE, 0.12 * GROUND_SCALE];
+const CITY_OFFSET: [number, number] = [-0.1651 * GROUND_SCALE, 0.1829 * GROUND_SCALE];
 
 function BakuCity({ timeline }: { timeline: React.MutableRefObject<TimelineState> }) {
   const groupRef = useRef<THREE.Group>(null);
@@ -369,8 +367,8 @@ function BakuCity({ timeline }: { timeline: React.MutableRefObject<TimelineState
   const regionMatRef = useRef<THREE.MeshBasicMaterial>(null);
   const cityMatRef = useRef<THREE.MeshBasicMaterial>(null);
 
-  const regionAlpha = useMemo(() => makeEdgeFadeAlpha(0.14), []);
-  const cityAlpha = useMemo(() => makeEdgeFadeAlpha(0.2), []);
+  const regionAlpha = useMemo(() => makeEdgeFadeAlpha(0.22), []);
+  const cityAlpha = useMemo(() => makeEdgeFadeAlpha(0.25), []);
 
   // Lazy progressive texture loading — the fast start screen is never blocked
   useEffect(() => {
